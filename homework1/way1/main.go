@@ -20,7 +20,7 @@ func getLine(numLine int, char int, size int) string {
 }
 
 func drawSandglass(char int, size int, color int) {
-	edgeLine := strings.Repeat(string(char), size)
+	edgeLine := strings.Repeat(string(rune(char)), size)
 	fmt.Printf("\033[%dm", color)
 	fmt.Println(edgeLine)
 	for i := 1; i < size-1; i++ {
