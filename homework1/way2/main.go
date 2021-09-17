@@ -67,4 +67,5 @@ func sandglass(opts ...Opt) {
 
 func main() {
   sandglass(color(34), size(5))
+  sandglass(char(10))
 }
