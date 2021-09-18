@@ -6,23 +6,23 @@ import (
 )
 
 type Arg = map[string]int
-type Opt func(a *Arg)
+type Opt func(a Arg)
 
 func char(x int) Opt {
-	return func(a *Arg) {
-		(*a)["char"] = x
+	return func(a Arg) {
+		a["char"] = x
 	}
 }
 
 func size(x int) Opt {
-	return func(a *Arg) {
-		(*a)["size"] = x
+	return func(a Arg) {
+		a["size"] = x
 	}
 }
 
 func color(x int) Opt {
-	return func(a *Arg) {
-		(*a)["color"] = x
+	return func(a Arg) {
+		a["color"] = x
 	}
 }
 
@@ -55,7 +55,7 @@ func sandglass(opts ...Opt) {
 		"color": 30,
 	}
 	for _, opt := range opts {
-		opt(&args)
+		opt(args)
 	}
 	drawSandglass(args["char"], args["size"], args["color"])
 }
