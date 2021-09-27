@@ -46,11 +46,11 @@ func (r *Transaction) UnmarshalJSON(data []byte) error {
 
 // check id is valid
 func checkId(obj interface{}) (interface{}, bool) {
-	switch obj.(type) {
+	switch v := obj.(type) {
 	case string:
-		return obj, true
+		return v, true
 	case float64:
-		return floatToInt(obj.(float64))
+		return floatToInt(v)
 	}
 	return obj, false
 }
@@ -82,9 +82,8 @@ func floatToInt(x float64) (int, bool) {
 	y := int(x)
 	if float64(y) == x {
 		return y, true
-	} else {
-		return y, false
 	}
+	return y, false
 }
 
 // converts strings and floats to non-negative int
@@ -161,13 +160,16 @@ func readData() ([]byte, error) {
 
 func writeData(path string, obj interface{}) error {
 	f, err := os.Create(path)
-	defer f.Close()
-	if err == nil {
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "\t")
-		err = enc.Encode(obj)
+	if err != nil {
+		return err
 	}
-	return err
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "\t")
+	if err = enc.Encode(obj); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func main() {
@@ -192,7 +194,7 @@ func main() {
 				resultsIdx[companyName] = len(results)
 				results = append(results, New(companyName))
 			}
-			results[resultsIdx[companyName]].addTransaction(transaction)
+			_ = results[resultsIdx[companyName]].addTransaction(transaction)
 		}
 	}
 
