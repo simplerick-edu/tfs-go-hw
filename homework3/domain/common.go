@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -42,4 +43,8 @@ type Candle struct {
 	Low    float64      // Минимальная цена
 	Close  float64      // Цена закрытие
 	TS     time.Time    // Время начала интервала
+}
+
+func (c Candle) String() string {
+	return fmt.Sprintf("%v,%v,%0.6f,%0.6f,%0.6f,%0.6f", c.Ticker, c.TS.Format("2006-01-02T15:04:05Z07:00"), c.Open, c.High, c.Low, c.Close)
 }
