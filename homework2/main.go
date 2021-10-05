@@ -22,10 +22,7 @@ type Op struct {
 type Transaction struct {
 	Company      string      `json:"company,omitempty"`
 	Operation    Op          `json:"operation,omitempty"`
-	OpSign       interface{} `json:"type,omitempty"`
-	Value        interface{} `json:"value,omitempty"`
-	ID           interface{} `json:"id,omitempty"`
-	CreationTime interface{} `json:"created_at,omitempty"`
+	Op
 }
 
 func (r *Transaction) SearchInOperation() {
