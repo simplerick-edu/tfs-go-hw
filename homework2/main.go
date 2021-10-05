@@ -12,36 +12,42 @@ import (
 	"time"
 )
 
-type Transaction struct {
-	Company      string
-	OpSign       int
-	Value        int
-	ID           interface{}
-	CreationTime time.Time
-	Success      bool
-	ValidOp      bool
+type Op struct {
+	OpSign       interface{} `json:"type,omitempty"`
+	Value        interface{} `json:"value,omitempty"`
+	ID           interface{} `json:"id,omitempty"`
+	CreationTime interface{} `json:"created_at,omitempty"`
 }
 
-func (r *Transaction) UnmarshalJSON(data []byte) error {
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+type Transaction struct {
+	Company      string      `json:"company,omitempty"`
+	Operation    Op          `json:"operation,omitempty"`
+	OpSign       interface{} `json:"type,omitempty"`
+	Value        interface{} `json:"value,omitempty"`
+	ID           interface{} `json:"id,omitempty"`
+	CreationTime interface{} `json:"created_at,omitempty"`
+}
+
+func (r *Transaction) SearchInOperation() {
+	op := r.Operation
+	if op.ID != nil {
+		r.ID = op.ID
 	}
-	if op, ok := raw["operation"].(map[string]interface{}); ok {
-		for k, v := range op {
-			raw[k] = v
-		}
+	if op.OpSign != nil {
+		r.OpSign = op.OpSign
 	}
-	// assigning variables
-	if r.Company, r.Success = raw["company"].(string); r.Success {
-		if r.ID, r.Success = checkID(raw["id"]); r.Success {
-			r.CreationTime, r.Success = convertToTime(raw["created_at"])
-		}
+	if op.Value != nil {
+		r.Value = op.Value
 	}
-	if r.OpSign, r.ValidOp = convertToSign(raw["type"]); r.ValidOp {
-		r.Value, r.ValidOp = convertToInt(raw["value"])
+	if op.CreationTime != nil {
+		r.CreationTime = op.CreationTime
 	}
-	return nil
+}
+
+func (r1 *Transaction) Before(r2 Transaction) bool {
+	time1, _ := convertToTime(r1.CreationTime)
+	time2, _ := convertToTime(r2.CreationTime)
+	return time1.Before(time2)
 }
 
 // check id is valid
@@ -129,16 +135,25 @@ func New(companyName string) ConsolidatedReport {
 }
 
 func (r *ConsolidatedReport) addTransaction(rec Transaction) error {
+	if r.Company == "" {
+		return errors.New("Company name is empty")
+	}
 	if r.Company != rec.Company {
 		return errors.New("Company names do not match")
 	}
-	if rec.ValidOp {
-		r.Balance += rec.OpSign * rec.Value
-		r.ValidOpOperationCount++
-	} else {
-		r.InvalidOperations = append(r.InvalidOperations, rec.ID)
+	if id, ok := checkID(rec.ID); ok {
+		if _, ok := convertToTime(rec.CreationTime); ok {
+			opSign, ok1 := convertToSign(rec.OpSign)
+			value, ok2 := convertToInt(rec.Value)
+			if ok1 && ok2 {
+				r.Balance += opSign * value
+				r.ValidOpOperationCount++
+			} else {
+				r.InvalidOperations = append(r.InvalidOperations, id)
+			}
+		}
 	}
-	return nil
+	return errors.New("Transaction is invalid")
 }
 
 func readData() ([]byte, error) {
@@ -178,24 +193,29 @@ func main() {
 		fmt.Println(fmt.Errorf("Error when trying to read a file: %w", readErr))
 	}
 	var transactions []Transaction
-	_ = json.Unmarshal(data, &transactions)
+	err := json.Unmarshal(data, &transactions)
+	if err != nil {
+		fmt.Println(fmt.Errorf("Error when unmarshaling: %w", err))
+	}
+
+	for i, _ := range transactions {
+		transactions[i].SearchInOperation()
+	}
 
 	sort.Slice(transactions, func(i, j int) bool {
-		return transactions[i].CreationTime.Before(transactions[j].CreationTime)
+		return transactions[i].Before(transactions[j])
 	})
 
 	var results = []ConsolidatedReport{}
 	var resultsIdx = map[string]int{}
 
 	for _, transaction := range transactions {
-		if transaction.Success {
-			companyName := transaction.Company
-			if _, ok := resultsIdx[companyName]; !ok {
-				resultsIdx[companyName] = len(results)
-				results = append(results, New(companyName))
-			}
-			_ = results[resultsIdx[companyName]].addTransaction(transaction)
+		companyName := transaction.Company
+		if _, ok := resultsIdx[companyName]; !ok {
+			resultsIdx[companyName] = len(results)
+			results = append(results, New(companyName))
 		}
+		_ = results[resultsIdx[companyName]].addTransaction(transaction)
 	}
 
 	sort.Slice(results, func(i, j int) bool {
