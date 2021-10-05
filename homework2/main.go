@@ -16,7 +16,7 @@ type Transaction struct {
 	Company      string
 	OpSign       int
 	Value        int
-	Id           interface{}
+	ID           interface{}
 	CreationTime time.Time
 	Success      bool
 	ValidOp      bool
@@ -34,7 +34,7 @@ func (r *Transaction) UnmarshalJSON(data []byte) error {
 	}
 	// assigning variables
 	if r.Company, r.Success = raw["company"].(string); r.Success {
-		if r.Id, r.Success = checkId(raw["id"]); r.Success {
+		if r.ID, r.Success = checkID(raw["id"]); r.Success {
 			r.CreationTime, r.Success = convertToTime(raw["created_at"])
 		}
 	}
@@ -45,7 +45,7 @@ func (r *Transaction) UnmarshalJSON(data []byte) error {
 }
 
 // check id is valid
-func checkId(obj interface{}) (interface{}, bool) {
+func checkID(obj interface{}) (interface{}, bool) {
 	switch v := obj.(type) {
 	case string:
 		return v, true
@@ -134,9 +134,9 @@ func (r *ConsolidatedReport) addTransaction(rec Transaction) error {
 	}
 	if rec.ValidOp {
 		r.Balance += rec.OpSign * rec.Value
-		r.ValidOpOperationCount += 1
+		r.ValidOpOperationCount++
 	} else {
-		r.InvalidOperations = append(r.InvalidOperations, rec.Id)
+		r.InvalidOperations = append(r.InvalidOperations, rec.ID)
 	}
 	return nil
 }
