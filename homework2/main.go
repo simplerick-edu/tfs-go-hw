@@ -20,8 +20,8 @@ type Op struct {
 }
 
 type Transaction struct {
-	Company      string      `json:"company,omitempty"`
-	Operation    Op          `json:"operation,omitempty"`
+	Company   string `json:"company,omitempty"`
+	Operation Op     `json:"operation,omitempty"`
 	Op
 }
 
