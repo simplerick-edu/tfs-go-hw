@@ -44,8 +44,8 @@ func (r *Transaction) SearchInOperation() {
 	}
 }
 
-func (r1 *Transaction) Before(r2 Transaction) bool {
-	time1, _ := convertToTime(r1.CreationTime)
+func (r *Transaction) Before(r2 Transaction) bool {
+	time1, _ := convertToTime(r.CreationTime)
 	time2, _ := convertToTime(r2.CreationTime)
 	return time1.Before(time2)
 }
@@ -198,7 +198,7 @@ func main() {
 		fmt.Println(fmt.Errorf("Error when unmarshaling: %w", err))
 	}
 
-	for i, _ := range transactions {
+	for i := range transactions {
 		transactions[i].SearchInOperation()
 	}
 
