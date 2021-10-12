@@ -36,18 +36,13 @@ func main() {
 	candles = calc.FormCandle10m(&wg, candles)
 	candles = calc.Save(&wg, candles)
 
-CheckStop:
-	for {
-		select {
-		case <-stop:
-			cancel()
-		case _, ok := <-candles:
-			if !ok {
-				break CheckStop
-			}
+	go func() {
+		for _ = range candles {
 		}
-	}
-	logger.Info("all goroutines terminated")
+	}()
+	<-stop
+	cancel()
 	wg.Wait()
+	logger.Info("all goroutines terminated")
 	logger.Info("main process terminated")
 }
