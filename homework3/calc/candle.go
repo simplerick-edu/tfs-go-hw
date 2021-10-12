@@ -15,7 +15,13 @@ func FormCandleFromPrice(wg *sync.WaitGroup, prices <-chan domain.Price) <-chan 
 	var openTime time.Time
 	candles := make(map[string]domain.Candle)
 	go func() {
-		defer wg.Done()
+		defer func() {
+			for _, c := range candles {
+				out <- c
+			}
+			close(out)
+			wg.Done()
+		}()
 		for price := range prices {
 			time, _ := domain.PeriodTS(domain.CandlePeriod1m, price.TS)
 			if openTime.Before(time) {
@@ -35,10 +41,6 @@ func FormCandleFromPrice(wg *sync.WaitGroup, prices <-chan domain.Price) <-chan 
 			candle.Close = price.Value
 			candles[price.Ticker] = candle
 		}
-		for _, c := range candles {
-			out <- c
-		}
-		close(out)
 	}()
 	return out
 }
@@ -48,7 +50,13 @@ func FormCandle(wg *sync.WaitGroup, candles <-chan domain.Candle, period domain.
 	var openTime time.Time
 	newCandles := make(map[string]domain.Candle)
 	go func() {
-		defer wg.Done()
+		defer func() {
+			for _, c := range newCandles {
+				out <- c
+			}
+			close(out)
+			wg.Done()
+		}()
 		for candle := range candles {
 			time, _ := domain.PeriodTS(period, candle.TS)
 			if openTime.Before(time) {
@@ -68,10 +76,6 @@ func FormCandle(wg *sync.WaitGroup, candles <-chan domain.Candle, period domain.
 			c.Close = candle.Close
 			newCandles[candle.Ticker] = c
 		}
-		for _, c := range newCandles {
-			out <- c
-		}
-		close(out)
 	}()
 	return out
 }
