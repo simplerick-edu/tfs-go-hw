@@ -9,16 +9,17 @@ import (
 
 func main() {
 	root := chi.NewRouter()
+	service := ChatService{}
 	root.Use(middleware.Logger)
-	root.Post("/login", Login)
-	root.Post("/signup", Signup)
+	root.Post("/login", service.Login)
+	root.Post("/signup", service.Signup)
 
 	r := chi.NewRouter()
-	r.Use(Auth)
-	r.Get("/messages", GetChatMessages)
-	r.Post("/messages", PostChatMessages)
-	r.Get("/{id}/messages", GetUserMessages)
-	r.Post("/{id}/messages", PostUserMessages)
+	r.Use(service.Auth)
+	r.Get("/messages", service.GetChatMessages)
+	r.Post("/messages", service.PostChatMessages)
+	r.Get("/{id}/messages", service.GetUserMessages)
+	r.Post("/{id}/messages", service.PostUserMessages)
 
 	root.Mount("/users/", r)
 

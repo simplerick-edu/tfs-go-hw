@@ -20,8 +20,6 @@ const (
 	userID     = "ID"
 )
 
-// map with usernames and passwords
-var users = map[string]string{}
 
 type Message struct {
 	Username string `json:"user"`
@@ -39,9 +37,16 @@ type UserPair struct {
 	user1, user2 string
 }
 
-// storage for messages
-var chatMessages = Messages{}
-var userMessages = map[UserPair]*Messages{}
+
+type ChatService struct {
+	// map with usernames and passwords
+	users map[string]string
+	// storage for messages
+	chatMessages Messages
+	userMessages map[UserPair]*Messages
+}
+
+
 
 func createToken(user string) (string, error) {
 	t := jwt.New(jwt.GetSigningMethod("HS256"))
@@ -53,7 +58,7 @@ func createToken(user string) (string, error) {
 }
 
 // authentification
-func Login(w http.ResponseWriter, r *http.Request) {
+func (service *ChatService) Login(w http.ResponseWriter, r *http.Request) {
 	d, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -68,7 +73,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	expectedPassword, ok := users[creds.Username]
+	expectedPassword, ok := service.users[creds.Username]
 
 	if !ok || expectedPassword != creds.Password {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -92,7 +97,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // registration
-func Signup(w http.ResponseWriter, r *http.Request) {
+func (service *ChatService) Signup(w http.ResponseWriter, r *http.Request) {
 	d, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -107,8 +112,8 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if _, ok := users[creds.Username]; !ok {
-		users[creds.Username] = creds.Password
+	if _, ok := service.users[creds.Username]; !ok {
+		service.users[creds.Username] = creds.Password
 		w.WriteHeader(http.StatusCreated)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -117,7 +122,7 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorization
-func Auth(handler http.Handler) http.Handler {
+func (service *ChatService) Auth(handler http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieAuth)
 
@@ -157,47 +162,47 @@ func Auth(handler http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func GetChatMessages(w http.ResponseWriter, r *http.Request) {
-	getMessages(chatMessages, w, r)
+func (service *ChatService) GetChatMessages(w http.ResponseWriter, r *http.Request) {
+	getMessages(service.chatMessages, w, r)
 }
 
-func PostChatMessages(w http.ResponseWriter, r *http.Request) {
+func (service *ChatService) PostChatMessages(w http.ResponseWriter, r *http.Request) {
 	id, ok := r.Context().Value(userID).(string)
 	if !ok {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	postMessages(&chatMessages, id, w, r)
+	postMessages(&service.chatMessages, id, w, r)
 }
 
-func GetUserMessages(w http.ResponseWriter, r *http.Request) {
+func (service *ChatService) GetUserMessages(w http.ResponseWriter, r *http.Request) {
 	id, ok := r.Context().Value(userID).(string)
 	if !ok {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	id2 := chi.URLParam(r, "id")
-	m := userMessages[UserPair{id, id2}]
+	m := service.userMessages[UserPair{id, id2}]
 	if m == nil {
 		m = &Messages{}
-		userMessages[UserPair{id, id2}] = m
-		userMessages[UserPair{id2, id}] = m
+		service.userMessages[UserPair{id, id2}] = m
+		service.userMessages[UserPair{id2, id}] = m
 	}
 	getMessages(*m, w, r)
 }
 
-func PostUserMessages(w http.ResponseWriter, r *http.Request) {
+func (service *ChatService) PostUserMessages(w http.ResponseWriter, r *http.Request) {
 	id, ok := r.Context().Value(userID).(string)
 	if !ok {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	id2 := chi.URLParam(r, "id")
-	m := userMessages[UserPair{id, id2}]
+	m := service.userMessages[UserPair{id, id2}]
 	if m == nil {
 		m = &Messages{}
-		userMessages[UserPair{id, id2}] = m
-		userMessages[UserPair{id2, id}] = m
+		service.userMessages[UserPair{id, id2}] = m
+		service.userMessages[UserPair{id2, id}] = m
 	}
 	postMessages(m, id, w, r)
 }
