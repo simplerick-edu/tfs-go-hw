@@ -9,7 +9,7 @@ import (
 
 func main() {
 	root := chi.NewRouter()
-	service := ChatService{}
+	service := NewChatService()
 	root.Use(middleware.Logger)
 	root.Post("/login", service.Login)
 	root.Post("/signup", service.Signup)

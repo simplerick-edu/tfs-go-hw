@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	// "fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,6 @@ const (
 	cookieAuth = "auth"
 	userID     = "ID"
 )
-
 
 type Message struct {
 	Username string `json:"user"`
@@ -37,16 +37,21 @@ type UserPair struct {
 	user1, user2 string
 }
 
-
 type ChatService struct {
-	// map with usernames and passwords
-	users map[string]string
-	// storage for messages
-	chatMessages Messages
+	mu           sync.RWMutex
+	muChat       sync.RWMutex
+	users        map[string]string
+	chatMessages *Messages
 	userMessages map[UserPair]*Messages
 }
 
-
+func NewChatService() *ChatService {
+	return &ChatService{
+		users:        make(map[string]string),
+		chatMessages: &Messages{},
+		userMessages: make(map[UserPair]*Messages),
+	}
+}
 
 func createToken(user string) (string, error) {
 	t := jwt.New(jwt.GetSigningMethod("HS256"))
@@ -73,7 +78,9 @@ func (service *ChatService) Login(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	service.mu.RLock()
 	expectedPassword, ok := service.users[creds.Username]
+	service.mu.RUnlock()
 
 	if !ok || expectedPassword != creds.Password {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -112,13 +119,14 @@ func (service *ChatService) Signup(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
 	if _, ok := service.users[creds.Username]; !ok {
 		service.users[creds.Username] = creds.Password
 		w.WriteHeader(http.StatusCreated)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 	}
-
 }
 
 // authorization
@@ -163,7 +171,9 @@ func (service *ChatService) Auth(handler http.Handler) http.Handler {
 }
 
 func (service *ChatService) GetChatMessages(w http.ResponseWriter, r *http.Request) {
-	getMessages(service.chatMessages, w, r)
+	service.muChat.RLock()
+	defer service.muChat.RUnlock()
+	getMessages(*service.chatMessages, w, r)
 }
 
 func (service *ChatService) PostChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +182,9 @@ func (service *ChatService) PostChatMessages(w http.ResponseWriter, r *http.Requ
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	postMessages(&service.chatMessages, id, w, r)
+	service.muChat.Lock()
+	defer service.muChat.Unlock()
+	postMessages(service.chatMessages, id, w, r)
 }
 
 func (service *ChatService) GetUserMessages(w http.ResponseWriter, r *http.Request) {
@@ -182,11 +194,11 @@ func (service *ChatService) GetUserMessages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id2 := chi.URLParam(r, "id")
+	service.muChat.RLock()
+	defer service.muChat.RUnlock()
 	m := service.userMessages[UserPair{id, id2}]
 	if m == nil {
 		m = &Messages{}
-		service.userMessages[UserPair{id, id2}] = m
-		service.userMessages[UserPair{id2, id}] = m
 	}
 	getMessages(*m, w, r)
 }
@@ -198,6 +210,8 @@ func (service *ChatService) PostUserMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	id2 := chi.URLParam(r, "id")
+	service.muChat.Lock()
+	defer service.muChat.Unlock()
 	m := service.userMessages[UserPair{id, id2}]
 	if m == nil {
 		m = &Messages{}
@@ -227,7 +241,6 @@ func postMessages(m *Messages, userId string, w http.ResponseWriter, r *http.Req
 
 	var text string
 	err = json.Unmarshal(d, &text)
-	fmt.Println(err)
 	if err != nil || text == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
