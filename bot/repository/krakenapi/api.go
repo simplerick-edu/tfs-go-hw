@@ -11,14 +11,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
+type OpSide string
+
 const (
+	Buy  OpSide = "buy"
+	Sell OpSide = "sell"
+
 	WebSocketURL    string = "wss://futures.kraken.com/ws/v1"
-	SendOrderURL    string = "/api/v3/sendorder"
-	CancelOrdersURL string = "/api/v3/cancelallorders"
+	SendOrderURL    string = "https://demo-futures.kraken.com/derivatives/api/v3/sendorder"
+	CancelOrdersURL string = "https://demo-futures.kraken.com/derivatives/api/v3/cancelallorders"
 )
 
 type Message struct {
@@ -33,7 +39,7 @@ type Message struct {
 //	Close() error
 //}
 
-func NewKrakenService(publicKey string, privateKey string, timeout time.Duration) *KrakenAPI {
+func New(publicKey string, privateKey string, timeout time.Duration) *KrakenAPI {
 	return &KrakenAPI{
 		publicKey,
 		privateKey,
@@ -81,44 +87,72 @@ func (k *KrakenAPI) Subscribe(productIDs []string) (<-chan string, error) {
 	return out, err
 }
 
-func (k *KrakenAPI) Close() error {
-	err := k.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	return err
-}
-
 // REST
 
-//func (k *KrakenAPI) SendOrder() error {
-//	req, err := http.NewRequest(http.MethodPost, SendOrderURL+"?", nil)
-//	resp, err := k.client.Do()
-//}
-
-//func (k *KrakenAPI) CancelOrder() error {
-//	req, err := http.NewRequest(http.MethodPost, CancelOrdersURL+"?", nil)
-//	//resp, err := k.client.Do()
-//}
-
-func (k *KrakenAPI) createRequest(reqURL string, data url.Values) (*http.Request, error) {
-	return http.NewRequest(http.MethodPost, reqURL, strings.NewReader(data.Encode()))
+func (k *KrakenAPI) SendOrder(pair string, size int, side OpSide) (*http.Response, error) {
+	data := map[string]interface{}{
+		"pair":      pair,
+		"size":      size,
+		"side":      side,
+		"ordertype": "mkt",
+	}
+	req, err := k.createRequest(SendOrderURL, data)
+	if err != nil {
+		return nil, err
+	}
+	req = k.privateRequest(req)
+	return k.sendRequest(req)
 }
 
-func (k *KrakenAPI) privateRequest(req *http.Request) (*http.Request, error) {
+func (k *KrakenAPI) CancelOrders() (*http.Response, error) {
+	req, err := k.createRequest(CancelOrdersURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req = k.privateRequest(req)
+	return k.sendRequest(req)
+}
+
+func (k *KrakenAPI) createRequest(reqURL string, data map[string]interface{}) (*http.Request, error) {
+	values := url.Values{}
+	for key, value := range data {
+		switch v := value.(type) {
+		case string:
+			values.Set(key, v)
+		case int64:
+			values.Set(key, strconv.FormatInt(v, 10))
+		case float64:
+			values.Set(key, strconv.FormatFloat(v, 'f', 8, 64))
+		case bool:
+			values.Set(key, strconv.FormatBool(v))
+		default:
+			return nil, fmt.Errorf("unknown value type %v for key %s", value, key)
+		}
+	}
+	return http.NewRequest(http.MethodPost, reqURL, strings.NewReader(values.Encode()))
+}
+
+func (k *KrakenAPI) privateRequest(req *http.Request) *http.Request {
 	// Get sign
 	body, _ := req.GetBody()
 	postData, _ := io.ReadAll(body)
-	endpointPath := []byte(req.URL.Path)
+	endpointPath := []byte(req.URL.Path[12:])
 	sign := generateSign(postData, endpointPath, k.privateKey)
 	// Add headers
 	req.Header.Add("APIKey", k.publicKey)
 	req.Header.Add("Authent", sign)
-	return req, nil
+	return req
 }
 
-//func (k *KrakenAPI) sendRequest(req *http.Request) (interface{}, error) {
-//	resp, err := k.client.Do(req)
-//	return resp, err
-//}
-//
+func (k *KrakenAPI) sendRequest(req *http.Request) (*http.Response, error) {
+	resp, err := k.client.Do(req)
+	return resp, err
+}
+
+func (k *KrakenAPI) Close() error {
+	err := k.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	return err
+}
 
 func generateSign(postData []byte, endpointPath []byte, privateKey string) string {
 	// Concatenate postData + nonce + endpointPath
