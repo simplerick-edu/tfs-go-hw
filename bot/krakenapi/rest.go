@@ -14,31 +14,40 @@ import (
 	"strings"
 )
 
-//func (k *KrakenAPI) GetPositions() (*http.Response, error) {
-//	req, err := k.createRequest(BalanceURL, nil)
-//	if err != nil {
-//		return nil, err
-//	}
-//	req = k.privateRequest(req)
-//	return k.sendRequest(req)
+func (k *KrakenAPI) GetPositions() (*domain.OpenPositionsResponse, error) {
+	u, _ := url.Parse(OpenPositionsURL)
+	req, err := http.NewRequest(http.MethodGet, u.String(), strings.NewReader(u.RawQuery))
+	if err != nil {
+		return nil, err
+	}
+	req = k.privateRequest(req)
+	respBody, err := k.sendRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	resp := &domain.OpenPositionsResponse{}
+	if err := json.Unmarshal(respBody, resp); err != nil {
+		return nil, err
+	}
+	return resp, err
+}
+
+//func (k *KrakenAPI) Buy(symbol string, price float64, size int64) (*domain.SendOrderResponse, error) {
+//	return k.SendOrder(symbol, domain.Buy, IocType, price, size)
+//}
+//
+//func (k *KrakenAPI) Sell(symbol string, price float64, size int64) (*domain.SendOrderResponse, error) {
+//	return k.SendOrder(symbol, domain.Sell, IocType, price, size)
 //}
 
-func (k *KrakenAPI) Buy(symbol string, price float64, size int64) (*domain.SendOrderResponse, error) {
-	return k.SendOrder(symbol, Buy, price, size)
-}
-
-func (k *KrakenAPI) Sell(symbol string, price float64, size int64) (*domain.SendOrderResponse, error) {
-	return k.SendOrder(symbol, Sell, price, size)
-}
-
-func (k *KrakenAPI) SendOrder(symbol string, side string, price float64, size int64) (*domain.SendOrderResponse, error) {
+func (k *KrakenAPI) SendOrder(symbol string, side domain.Action, orderType domain.OrderType, price float64, size int64) (*domain.SendOrderResponse, error) {
 	u, _ := url.Parse(SendOrderURL)
 	values := url.Values{}
 	values.Set("symbol", symbol)
 	values.Set("limitPrice", strconv.FormatFloat(price, 'f', 3, 64))
 	values.Set("size", strconv.FormatInt(size, 10))
-	values.Set("side", side)
-	values.Set("orderType", "ioc")
+	values.Set("side", string(side))
+	values.Set("orderType", string(orderType))
 	u.RawQuery = values.Encode()
 	req, err := http.NewRequest(http.MethodPost, u.String(), strings.NewReader(u.RawQuery))
 	if err != nil {

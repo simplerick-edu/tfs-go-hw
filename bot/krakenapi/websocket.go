@@ -2,13 +2,22 @@ package krakenapi
 
 import (
 	"bot/domain"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
 )
 
 const ReconnectAttempts = 10
 
+var (
+	ErrMaxReconnects = errors.New("the maximum number of reconnection attempts has been reached")
+)
+
 func (k *KrakenAPI) Connect(trialNum int) error {
+	if trialNum < 0 {
+		return ErrMaxReconnects
+	}
 	if c, _, err := websocket.DefaultDialer.Dial(WebSocketURL, nil); err == nil {
 		k.conn = c
 		k.closed = false
@@ -17,8 +26,8 @@ func (k *KrakenAPI) Connect(trialNum int) error {
 	return k.Connect(trialNum - 1)
 }
 
-func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan string, error) {
-	out := make(chan string)
+func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error) {
+	out := make(chan domain.Ticker)
 	ConnectAndSendMsg := func(msg domain.Message) error {
 		if err := k.Connect(ReconnectAttempts); err != nil {
 			return err
@@ -30,7 +39,7 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan string, error) {
 	}
 	msg := domain.Message{
 		Event:      "subscribe",
-		Feed:       "ticker",
+		Feed:       "candles_trade_1m",
 		ProductIDs: productIDs,
 	}
 	if err := ConnectAndSendMsg(msg); err != nil {
@@ -51,7 +60,9 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan string, error) {
 					}
 				}
 			}
-			out <- string(message)
+			ticker := domain.Ticker{}
+			json.Unmarshal(message, &ticker)
+			out <- ticker
 		}
 	}()
 	return out, nil

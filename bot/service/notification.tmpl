@@ -1,0 +1,11 @@
+{{$status := .Status}}
+{{range .OrderEvents}}
+{{ if  eq .Type "EXECUTION" -}}
+    *The order has been EXECUTED*:
+    {{.ExecOrder.Side}} {{.Amount}} `{{.ExecOrder.Symbol}}` at {{.Price}}
+{{ else -}}
+    *The order has been CANCELED:*
+    {{.Order.Side}} {{.Order.Quantity}} `{{.Order.Symbol}}` at {{.Order.LimitPrice}}
+    status: {{$status}}
+{{end}}
+{{end}}

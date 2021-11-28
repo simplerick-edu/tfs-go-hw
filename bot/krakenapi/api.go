@@ -9,12 +9,10 @@ import (
 )
 
 const (
-	Buy             = "buy"
-	Sell            = "sell"
-	WebSocketURL    = "wss://demo-futures.kraken.com/ws/v1"
-	SendOrderURL    = "https://demo-futures.kraken.com/derivatives/api/v3/sendorder?"
-	CancelOrdersURL = "https://demo-futures.kraken.com/derivatives/api/v3/cancelallorders"
-	BalanceURL      = "https://demo-futures.kraken.com/derivatives/api/v3/balance"
+	WebSocketURL     = "wss://demo-futures.kraken.com/ws/v1"
+	SendOrderURL     = "https://demo-futures.kraken.com/derivatives/api/v3/sendorder?"
+	CancelOrdersURL  = "https://demo-futures.kraken.com/derivatives/api/v3/cancelallorders"
+	OpenPositionsURL = "https://demo-futures.kraken.com/derivatives//api/v3/openpositions"
 )
 
 type KrakenAPI struct {

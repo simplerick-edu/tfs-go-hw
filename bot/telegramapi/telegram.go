@@ -1,24 +1,29 @@
-package telegram
+package telegramapi
 
 import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"sync"
 )
 
-type Bot struct {
-	chats map[int64]*tgbotapi.Chat
-	bot   *tgbotapi.BotAPI
+type TgBot struct {
+	chatsMu    sync.Mutex
+	chats      map[int64]*tgbotapi.Chat
+	bot        *tgbotapi.BotAPI
+	jobQueueMu sync.Mutex
+	jobQueue   chan<- string
 }
 
-func NewBot(token string) (*Bot, error) {
+func New(token string) (*TgBot, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
-	return &Bot{
+	return &TgBot{
 		chats: make(map[int64]*tgbotapi.Chat),
 		bot:   bot,
 	}, err
 }
 
-func (t *Bot) Start() error {
+func (t *TgBot) Start() error {
+	// updates handling
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
 	updates, err := t.bot.GetUpdatesChan(updateConfig)
@@ -45,29 +50,48 @@ func (t *Bot) Start() error {
 			default:
 				msg.Text = "See /help for list of commands"
 			}
-
 			if _, err := t.bot.Send(msg); err != nil {
 				fmt.Println(err)
+			}
+		}
+	}()
+	// job queue: listen and send messages
+	t.jobQueue = make(chan string)
+	go func() {
+		for message := range t.jobQueue {
+			err := t.sendMessage(message)
+			if err != nil {
+				return
 			}
 		}
 	}()
 	return err
 }
 
-func (t *Bot) Stop() {
+func (t *TgBot) Stop() {
+	t.jobQueueMu.Lock()
+	defer t.jobQueueMu.Unlock()
+	close(t.jobQueue)
 	t.bot.StopReceivingUpdates()
 }
 
-func (t *Bot) addChat(chat *tgbotapi.Chat) {
+func (t *TgBot) addChat(chat *tgbotapi.Chat) {
+	t.chatsMu.Lock()
+	defer t.chatsMu.Unlock()
 	t.chats[chat.ID] = chat
 }
 
-func (t *Bot) removeChat(chatID int64) {
+func (t *TgBot) removeChat(chatID int64) {
+	t.chatsMu.Lock()
+	defer t.chatsMu.Unlock()
 	delete(t.chats, chatID)
 }
 
-func (t *Bot) Notify(text string) error {
+func (t *TgBot) sendMessage(text string) error {
+	t.chatsMu.Lock()
+	defer t.chatsMu.Unlock()
 	msg := tgbotapi.NewMessage(0, text)
+	msg.ParseMode = "markdown"
 	for chatID := range t.chats {
 		msg.ChatID = chatID
 		_, err := t.bot.Send(msg)
@@ -77,4 +101,10 @@ func (t *Bot) Notify(text string) error {
 	}
 	fmt.Println("notification sent")
 	return nil
+}
+
+func (t *TgBot) Notify(text string) {
+	t.jobQueueMu.Lock()
+	defer t.jobQueueMu.Unlock()
+	t.jobQueue <- text
 }
