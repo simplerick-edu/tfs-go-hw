@@ -51,10 +51,10 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 			_, message, err := k.conn.ReadMessage()
 			if err != nil {
 				if k.closed {
-					log.Println("Normal Termination")
+					log.Println("normal termination")
 					return
 				} else {
-					log.Println("Websocket: retry to connect")
+					log.Println("websocket: retry to connect")
 					if err := ConnectAndSendMsg(msg); err != nil {
 						return
 					}

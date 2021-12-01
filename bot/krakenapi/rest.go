@@ -44,7 +44,7 @@ func (k *KrakenAPI) SendOrder(symbol string, side domain.Action, orderType domai
 	u, _ := url.Parse(SendOrderURL)
 	values := url.Values{}
 	values.Set("symbol", symbol)
-	values.Set("limitPrice", strconv.FormatFloat(price, 'f', 3, 64))
+	values.Set("limitPrice", strconv.FormatFloat(price, 'f', 4, 64))
 	values.Set("size", strconv.FormatInt(size, 10))
 	values.Set("side", string(side))
 	values.Set("orderType", string(orderType))

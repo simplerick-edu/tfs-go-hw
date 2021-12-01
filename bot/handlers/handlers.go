@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/go-chi/chi/v5"
+	"log"
 	"net/http"
 )
 
@@ -31,6 +32,7 @@ func (b *BotHandler) Routes() chi.Router {
 func (b *BotHandler) start(w http.ResponseWriter, r *http.Request) {
 	err := b.service.Start()
 	if err != nil {
+		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	w.WriteHeader(http.StatusOK)

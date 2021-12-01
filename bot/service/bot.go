@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"text/template"
@@ -95,7 +96,7 @@ func (b *Bot) Start() error {
 	tickerSequences := make(chan []domain.Ticker)
 	go func() {
 		defer func() {
-			log.Println("Shutdown")
+			log.Println("shutdown")
 			close(tickerSequences)
 			b.exchangeAPI.Unsubscribe()
 			b.notifier.Stop()
@@ -143,7 +144,7 @@ func (b *Bot) Start() error {
 func (b *Bot) FetchOpenPositions() error {
 	resp, err := b.exchangeAPI.GetPositions()
 	if err != nil {
-		return nil
+		return fmt.Errorf("failed to fetch open positions: %w", err)
 	}
 	if resp.Result != domain.Success {
 		return errors.New(*resp.Error)
@@ -158,6 +159,7 @@ func (b *Bot) FetchOpenPositions() error {
 			b.openPositions[pos.Symbol] = -pos.Size
 		}
 	}
+	log.Println("current open positions: ", b.openPositions)
 	return nil
 }
 
@@ -165,6 +167,7 @@ func (b *Bot) ChangePosition(side domain.Action, size int64, price float64) erro
 	var sign int64
 	switch side {
 	case domain.None:
+		log.Println("action was not specified, position unchanged")
 		return nil
 	case domain.Buy:
 		sign = 1
@@ -177,7 +180,7 @@ func (b *Bot) ChangePosition(side domain.Action, size int64, price float64) erro
 	// keep position size within limits (-maxPositionSize, +maxPositionSize)
 	size = domain.Min(size, b.maxPositionSize-sign*currentPos)
 	if size != 0 {
-		resp, err := b.exchangeAPI.SendOrder(b.instrument, side, domain.LmtType, price, size)
+		resp, err := b.exchangeAPI.SendOrder(b.instrument, side, domain.IocType, price, size)
 		if err != nil {
 			return err
 		}
@@ -194,7 +197,7 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 	var message string
 	var amount int64
 	if resp.Result == domain.Error {
-		message = *resp.Error
+		message = "sending order failed: " + *resp.Error
 	} else {
 		var buff bytes.Buffer
 		NotificationTemplate.Execute(&buff, resp.SendStatus)
@@ -211,6 +214,7 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 	}
 	// send notification
 	b.notifier.Notify(message)
+	log.Println(message)
 	return amount
 }
 

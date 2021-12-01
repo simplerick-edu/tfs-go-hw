@@ -46,7 +46,7 @@ func main() {
 
 	// service
 	tradebot := service.New(krakenAPI, telegramNotifier, repo, modelService,
-		"PI_XBTUSD", 10, 1, 0.5, 20, 1)
+		"PI_XBTUSD", 10, 1, 0.5, 4, 1)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -54,5 +54,5 @@ func main() {
 	tradebotHandler := handlers.New(tradebot)
 	r.Mount("/", tradebotHandler.Routes())
 
-	http.ListenAndServe(":3000", r)
+	log.Fatal(http.ListenAndServe(":3000", r))
 }
