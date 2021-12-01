@@ -1,17 +1,17 @@
 package telegramapi
 
 import (
-	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"log"
+	"os"
 	"sync"
 )
 
 type TgBot struct {
-	chatsMu    sync.Mutex
-	chats      map[int64]*tgbotapi.Chat
-	bot        *tgbotapi.BotAPI
-	jobQueueMu sync.Mutex
-	jobQueue   chan<- string
+	chatsMu  sync.Mutex
+	chats    map[int64]*tgbotapi.Chat
+	bot      *tgbotapi.BotAPI
+	jobQueue chan string
 }
 
 func New(token string) (*TgBot, error) {
@@ -20,6 +20,14 @@ func New(token string) (*TgBot, error) {
 		chats: make(map[int64]*tgbotapi.Chat),
 		bot:   bot,
 	}, err
+}
+
+func NewWithCreds(filePath string) (*TgBot, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return New(string(data))
 }
 
 func (t *TgBot) Start() error {
@@ -51,7 +59,7 @@ func (t *TgBot) Start() error {
 				msg.Text = "See /help for list of commands"
 			}
 			if _, err := t.bot.Send(msg); err != nil {
-				fmt.Println(err)
+				log.Println(err)
 			}
 		}
 	}()
@@ -69,8 +77,6 @@ func (t *TgBot) Start() error {
 }
 
 func (t *TgBot) Stop() {
-	t.jobQueueMu.Lock()
-	defer t.jobQueueMu.Unlock()
 	close(t.jobQueue)
 	t.bot.StopReceivingUpdates()
 }
@@ -99,12 +105,10 @@ func (t *TgBot) sendMessage(text string) error {
 			return err
 		}
 	}
-	fmt.Println("notification sent")
+	log.Println("notification sent")
 	return nil
 }
 
 func (t *TgBot) Notify(text string) {
-	t.jobQueueMu.Lock()
-	defer t.jobQueueMu.Unlock()
 	t.jobQueue <- text
 }

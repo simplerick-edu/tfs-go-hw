@@ -4,8 +4,8 @@ import (
 	"bot/domain"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/gorilla/websocket"
+	"log"
 )
 
 const ReconnectAttempts = 10
@@ -43,7 +43,7 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 		ProductIDs: productIDs,
 	}
 	if err := ConnectAndSendMsg(msg); err != nil {
-		return out, nil
+		return out, err
 	}
 	go func() {
 		defer close(out)
@@ -51,10 +51,10 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 			_, message, err := k.conn.ReadMessage()
 			if err != nil {
 				if k.closed {
-					fmt.Println("Normal Termination")
+					log.Println("Normal Termination")
 					return
 				} else {
-					fmt.Println("Retry")
+					log.Println("Websocket: retry to connect")
 					if err := ConnectAndSendMsg(msg); err != nil {
 						return
 					}

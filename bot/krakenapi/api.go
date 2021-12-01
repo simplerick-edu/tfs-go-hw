@@ -33,10 +33,16 @@ func New(publicKey string, privateKey string, timeout time.Duration) *KrakenAPI 
 	}
 }
 
-func NewFromConfig(filePath string) *KrakenAPI {
+func NewWithConfig(filePath string) (*KrakenAPI, error) {
 	var c map[string]string
-	data, _ := os.ReadFile(filePath)
-	_ = yaml.Unmarshal(data, &c)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	err = yaml.Unmarshal(data, &c)
+	if err != nil {
+		return nil, err
+	}
 	timeout, _ := time.ParseDuration(c["timeout"])
-	return New(c["public_key"], c["private_key"], timeout)
+	return New(c["public_key"], c["private_key"], timeout), nil
 }

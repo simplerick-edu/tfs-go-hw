@@ -3,11 +3,15 @@ package service
 import (
 	"bot/domain"
 	"bytes"
+	"context"
+	"errors"
+	"log"
 	"sync"
 	"text/template"
 )
 
 type ExchangeAPI interface {
+	GetPositions() (*domain.OpenPositionsResponse, error)
 	SendOrder(symbol string, side domain.Action, orderType domain.OrderType, price float64, size int64) (*domain.SendOrderResponse, error)
 	CancelOrders() (*domain.CancelOrdersResponse, error)
 	Subscribe(...string) (<-chan domain.Ticker, error)
@@ -15,11 +19,11 @@ type ExchangeAPI interface {
 }
 
 type Predictor interface {
-	Predict(domain.Ticker) (float64, error)
+	Predict(tickers ...domain.Ticker) (float64, error)
 }
 
-type Database interface {
-	Store(domain.OrderEvent) error
+type Storage interface {
+	StoreEvent(ctx context.Context, event domain.OrderEvent) error
 }
 
 type Notifier interface {
@@ -28,43 +32,133 @@ type Notifier interface {
 	Stop()
 }
 
-var NotificationTemplate = template.Must(template.ParseFiles("notification.tmpl"))
+var NotificationTemplate = template.Must(template.ParseFiles("service/notification.tmpl"))
 
 type Bot struct {
 	// api
 	exchangeAPI ExchangeAPI
 	notifier    Notifier
-	database    Database
+	storage     Storage
 	model       Predictor
 	// parameters
 	instrument        string
 	maxPositionSize   int64
-	OrderSize         int64
+	orderSize         int64
 	decisionThreshold float64
+	sequenceLength    int
 	priceSlipPercent  int64
 	// internal variables
-	mu            sync.Mutex
-	openPositions map[string]int64
+	mu              sync.Mutex
+	openPositions   map[string]int64
+	shutdownChannel chan interface{}
 }
 
-//func (b *Bot) Start() error {
-//	tickers, err := b.exchangeAPI.Subscribe(b.instrument)
-//	go func() {
-//		for ticker := range(tickers) {
-//			value, err := b.calculateIndicator(ticker)
-//			price := ticker.Ask * (1 + float64(b.priceSlipPercent)/100)
-//			price := ticker.Bid * (1 - float64(b.priceSlipPercent)/100)
-//			if err != nil {
-//				return
-//			}
-//			err = b.executeTrade(value)
-//		}
-//	}()
-//	return err
-//}
+func New(exchangeAPI ExchangeAPI,
+	notifier Notifier,
+	storage Storage,
+	model Predictor,
+	instrument string,
+	maxPositionSize int64,
+	orderSize int64,
+	decisionThreshold float64,
+	sequenceLength int,
+	priceSlipPercent int64) *Bot {
+	return &Bot{
+		exchangeAPI,
+		notifier,
+		storage,
+		model,
+		instrument,
+		maxPositionSize,
+		orderSize,
+		decisionThreshold,
+		sequenceLength,
+		priceSlipPercent,
+		sync.Mutex{},
+		make(map[string]int64),
+		make(chan interface{}),
+	}
+}
 
-func (b *Bot) GetOpenPositions() {
+func (b *Bot) Start() error {
+	if err := b.FetchOpenPositions(); err != nil {
+		return err
+	}
+	tickers, err := b.exchangeAPI.Subscribe(b.instrument)
+	if err != nil {
+		return err
+	}
+	if err := b.notifier.Start(); err != nil {
+		return err
+	}
+	// collect tickers
+	tickerSequences := make(chan []domain.Ticker)
+	go func() {
+		defer func() {
+			log.Println("Shutdown")
+			close(tickerSequences)
+			b.exchangeAPI.Unsubscribe()
+			b.notifier.Stop()
+		}()
+		seq := make([]domain.Ticker, 0, b.sequenceLength)
+		for ticker := range tickers {
+			select {
+			case <-b.shutdownChannel:
+				return
+			default:
+				if len(seq) == b.sequenceLength {
+					tickerSequences <- seq
+					seq = make([]domain.Ticker, 0, b.sequenceLength)
+				}
+				seq = append(seq, ticker)
+			}
+		}
+	}()
+	// process sequences
+	go func() {
+		for tickers := range tickerSequences {
+			action, err := b.makeDecision(tickers)
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+			// calculate price
+			var price float64
+			if action == domain.Buy {
+				price = tickers[len(tickers)-1].Ask * (1 + float64(b.priceSlipPercent)/100)
+			}
+			if action == domain.Sell {
+				price = tickers[len(tickers)-1].Bid * (1 - float64(b.priceSlipPercent)/100)
+			}
+			err = b.ChangePosition(action, b.orderSize, price)
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+		}
+	}()
+	return err
+}
 
+func (b *Bot) FetchOpenPositions() error {
+	resp, err := b.exchangeAPI.GetPositions()
+	if err != nil {
+		return nil
+	}
+	if resp.Result != domain.Success {
+		return errors.New(*resp.Error)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.openPositions = make(map[string]int64)
+	for _, pos := range resp.OpenPositions {
+		if pos.Side == "long" {
+			b.openPositions[pos.Symbol] = pos.Size
+		} else {
+			b.openPositions[pos.Symbol] = -pos.Size
+		}
+	}
+	return nil
 }
 
 func (b *Bot) ChangePosition(side domain.Action, size int64, price float64) error {
@@ -108,7 +202,10 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 		// get filled amount, store to db
 		if resp.SendStatus.Status == "placed" {
 			event := resp.SendStatus.OrderEvents[0]
-			b.database.Store(event)
+			err := b.storage.StoreEvent(context.Background(), event)
+			if err != nil {
+				log.Println(err)
+			}
 			amount = event.Amount
 		}
 	}
@@ -117,9 +214,9 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 	return amount
 }
 
-func (b *Bot) makeDecision(ticker domain.Ticker) (domain.Action, error) {
+func (b *Bot) makeDecision(tickers []domain.Ticker) (domain.Action, error) {
 	// receive predicted value in range (0,1)
-	value, err := b.model.Predict(ticker)
+	value, err := b.model.Predict(tickers...)
 	if err != nil {
 		return domain.None, err
 	}
@@ -132,10 +229,6 @@ func (b *Bot) makeDecision(ticker domain.Ticker) (domain.Action, error) {
 	return domain.None, nil
 }
 
-//func (b *Bot) ClosePositions() error {
-//	b.mu.Lock()
-//	defer b.mu.Unlock()
-//	for symbol, position := range b.openPositions {
-//		if position > 0
-//	}
-//}
+func (b *Bot) Stop() {
+	close(b.shutdownChannel)
+}

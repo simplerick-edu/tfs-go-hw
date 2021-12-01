@@ -1,77 +1,58 @@
 package main
 
 import (
-	"bot/repository/krakenapi"
-	"flag"
+	"bot/handlers"
+	"bot/krakenapi"
+	"bot/modelapi"
+	"bot/repository"
+	"bot/service"
+	"bot/telegramapi"
+	"context"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"log"
-	"os"
-	"os/signal"
+	"net/http"
 )
 
-//type config struct {
-//	PublicKey string `yaml:"publickey"`
-//	PrivateKey string `yaml:"privatekey"`
-//	Timeout time.Duration`yaml:"duration"`
-//}
-
 func main() {
+	//logger := log.New()
+	//logger.SetLevel(log.DebugLevel)
 
-	var filePathFlag = flag.String("config", "", "path to file")
-	flag.Parse()
-	log.SetFlags(0)
+	// repository
+	dsn := "postgres://user:passwd@localhost:5432/orders" +
+		"?sslmode=disable"
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		log.Println(err)
+	}
+	pool, err := pgxpool.ConnectConfig(context.Background(), poolConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pool.Close()
+	repo := repository.New(pool)
 
-	k := krakenapi.NewFromConfig(*filePathFlag)
+	// notifier
+	telegramNotifier, _ := telegramapi.NewWithCreds("tg_creds")
 
-	// TEST WEBSOCKET
-	//ctx, cancel := context.WithCancel(context.Background())
-	//err = k.Connect(3)
-	//if err != nil {
-	//	log.Println(err)
-	//}
-	//out, err := k.Subscribe("PI_ETHUSD")
-	//if err != nil {
-	//	log.Println(err)
-	//}
-	//go func() {
-	//	for msg := range out {
-	//		log.Println(msg)
-	//	}
-	//}()
-	//<-interrupt
-	//k.Stop()
-	//time.Sleep(2 * time.Second)
+	// kraken api
+	krakenAPI, _ := krakenapi.NewWithConfig("kraken_config.yaml")
 
-	//TEST REST
-	//resp, err := k.SendOrder("PI_ETHUSD", 4411, 10, krakenapi.Sell)
-	//if err != nil {
-	//	log.Println(err)
-	//}
-	//defer resp.Body.Close()
-	//bodyBytes, err := io.ReadAll(resp.Body)
-	//log.Println(string(bodyBytes))
+	// model service
+	url := "http://localhost:7070/v1/models/trade_model:predict"
+	modelService := modelapi.New(url)
 
-	cancelResp, _ := k.CancelOrders()
-	log.Println(cancelResp.CancelStatus.Status)
-	log.Println(cancelResp.Result)
+	// service
+	tradebot := service.New(krakenAPI, telegramNotifier, repo, modelService,
+		"PI_XBTUSD", 10, 1, 0.5, 20, 1)
 
-	//TEST TELEGRAM
-	//tgBot, err := telegram.NewBot("ef")
-	//if err != nil {
-	//    log.Println(err)
-	//    return
-	//}
-	//tgBot.Start()
-	//
-	//go func() {
-	//	for {
-	//		time.Sleep(5 * time.Second)
-	//		tgBot.Notify("refer")
-	//	}
-	//}()
-	//<-interrupt
-	//tgBot.Stop()
-	//time.Sleep(1 * time.Second)
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+
+	tradebotHandler := handlers.New(tradebot)
+	r.Mount("/", tradebotHandler.Routes())
+
+	http.ListenAndServe(":3000", r)
 }
