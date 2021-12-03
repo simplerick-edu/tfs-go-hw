@@ -1,0 +1,7 @@
+services:
+  tf:
+    build: .
+    ports:
+      - "7070:7070"
+    volumes:
+      - ./:/home/tf/

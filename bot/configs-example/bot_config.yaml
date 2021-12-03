@@ -1,0 +1,6 @@
+instrument : PI_XBTUSD
+order_size: 3
+max_position_size: 100
+decision_threshold : 0.6
+sequence_length: 15
+price_slip_percent: 1
