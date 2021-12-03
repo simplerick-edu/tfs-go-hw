@@ -1,19 +1,20 @@
 package main
 
 import (
+	"flag"
+	"net/http"
+	"os"
+	// not-std
 	"bot/handlers"
 	"bot/krakenapi"
 	"bot/modelapi"
 	"bot/repository"
 	"bot/service"
 	"bot/telegramapi"
-	"flag"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
-	"log"
-	"net/http"
-	"os"
 )
 
 var dsn string
@@ -70,12 +71,6 @@ func main() {
 
 	// service
 	tradeBot := service.New(krakenAPI, telegramNotifier, repo, modelService, botConfig)
-
-	log.Println(krakenapiConfig)
-	log.Println(botConfig)
-	log.Println(modelServiceURL)
-	log.Println(telegramToken)
-	log.Println(dsn)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

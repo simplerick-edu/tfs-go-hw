@@ -2,9 +2,10 @@ package telegramapi
 
 import (
 	"errors"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"log"
 	"sync"
+	// not-std
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	log "github.com/sirupsen/logrus"
 )
 
 var JobQueueIsFull = errors.New("notifier's job queue is full")
@@ -61,7 +62,7 @@ func (t *TgBot) Start() error {
 				msg.Text = "See /help for list of commands"
 			}
 			if _, err := t.bot.Send(msg); err != nil {
-				log.Println(err)
+				log.Error(err)
 			}
 		}
 	}()
@@ -71,7 +72,7 @@ func (t *TgBot) Start() error {
 		for message := range t.jobQueue {
 			err := t.sendMessage(message)
 			if err != nil {
-				log.Println(err)
+				log.Error(err)
 				return
 			}
 		}
@@ -109,7 +110,7 @@ func (t *TgBot) sendMessage(text string) error {
 		}
 	}
 	if len(t.chats) > 0 {
-		log.Println("notification sent")
+		log.Info("notification sent")
 	}
 	return nil
 }

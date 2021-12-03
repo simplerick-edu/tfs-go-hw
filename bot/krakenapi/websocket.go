@@ -1,11 +1,13 @@
 package krakenapi
 
 import (
-	"bot/domain"
 	"encoding/json"
 	"errors"
+	"fmt"
+	// not-std
+	"bot/domain"
 	"github.com/gorilla/websocket"
-	"log"
+	log "github.com/sirupsen/logrus"
 )
 
 const ReconnectAttempts = 10
@@ -31,7 +33,7 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 			return err
 		}
 		if err := k.conn.WriteJSON(msg); err != nil {
-			return err
+			return fmt.Errorf("can't write to websocket: %w", err)
 		}
 		return nil
 	}
@@ -49,11 +51,12 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 			_, message, err := k.conn.ReadMessage()
 			if err != nil {
 				if k.closed {
-					log.Println("normal termination")
+					log.Info("normal termination")
 					return
 				} else {
-					log.Println("websocket: retry to connect")
+					log.Warningf("websocket: retry to connect")
 					if err := ConnectAndSendMsg(msg); err != nil {
+						log.Error(err)
 						return
 					}
 				}
@@ -61,7 +64,7 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 			ticker := domain.Ticker{}
 			err = json.Unmarshal(message, &ticker)
 			if err != nil {
-				log.Println("websocket: ", err)
+				log.Info("websocket: ", err)
 				return
 			}
 			out <- ticker

@@ -1,11 +1,12 @@
 package modelapi
 
 import (
-	"bot/domain"
 	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	// not-std
+	"bot/domain"
 )
 
 type vector []float64

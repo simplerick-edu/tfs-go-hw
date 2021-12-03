@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 type Ticker struct {
 	Time         int64   `json:"time"`
 	Feed         string  `json:"feed"`
@@ -14,4 +16,8 @@ type Ticker struct {
 	Last         float64 `json:"last"`     // last trade price
 	Change       float64 `json:"change"`   // 24h change
 	OpenInterest float64 `json:"openInterest"`
+}
+
+func (ticker *Ticker) String() string {
+	return fmt.Sprintf("%0.6f,%0.6f,%0.6f,%0.6f,%0.6f,%0.6f,%0.6f,%0.6f,%0.6f", ticker.Bid, ticker.Ask, ticker.BidSize, ticker.AskSize, ticker.Volume, float64(ticker.Dtm), ticker.Last, ticker.Change, ticker.OpenInterest)
 }

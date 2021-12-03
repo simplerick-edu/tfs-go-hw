@@ -1,7 +1,6 @@
 package krakenapi
 
 import (
-	"bot/domain"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -9,30 +8,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	// not-std
+	"bot/domain"
 )
 
 func (k *KrakenAPI) GetPositions() (*domain.OpenPositionsResponse, error) {
-	u, _ := url.Parse(OpenPositionsURL)
+	u, err := url.Parse(OpenPositionsURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse url: %w", err)
+	}
 	req, err := http.NewRequest(http.MethodGet, u.String(), strings.NewReader(u.RawQuery))
 	if err != nil {
-		return nil, fmt.Errorf("can't get open positons: %w", err)
+		return nil, fmt.Errorf("can't create request: %w", err)
 	}
 	req, err = k.privateRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("can't get open positons: %w", err)
+		return nil, fmt.Errorf("can't make private request: %w", err)
 	}
 	respBody, err := k.sendRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("can't get open positons: %w", err)
+		return nil, fmt.Errorf("can't send request: %w", err)
 	}
 	resp := &domain.OpenPositionsResponse{}
 	if err := json.Unmarshal(respBody, resp); err != nil {
-		return nil, fmt.Errorf("can't get open positons: %w", err)
+		return nil, err
 	}
 	return resp, nil
 }
@@ -47,15 +50,17 @@ func (k *KrakenAPI) SendOrder(order domain.Order) (*domain.SendOrderResponse, er
 	values.Set("side", string(order.Side))
 	values.Set("orderType", string(order.Type))
 	u.RawQuery = values.Encode()
-	log.Println(u.RawQuery)
 	req, err := http.NewRequest(http.MethodPost, u.String(), strings.NewReader(u.RawQuery))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't create request: %w", err)
 	}
 	req, err = k.privateRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("can't make private request: %w", err)
+	}
 	respBody, err := k.sendRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't send request: %w", err)
 	}
 	resp := &domain.SendOrderResponse{}
 	if err := json.Unmarshal(respBody, resp); err != nil {
@@ -68,15 +73,15 @@ func (k *KrakenAPI) CancelOrders() (*domain.CancelOrdersResponse, error) {
 	u, _ := url.Parse(CancelOrdersURL)
 	req, err := http.NewRequest(http.MethodPost, u.String(), strings.NewReader(u.RawQuery))
 	if err != nil {
-		return nil, fmt.Errorf("cancel orders: %w", err)
+		return nil, fmt.Errorf("can't create request: %w", err)
 	}
 	req, err = k.privateRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("cancel orders: %w", err)
+		return nil, fmt.Errorf("can't make private request: %w", err)
 	}
 	respBody, err := k.sendRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("cancel orders: %w", err)
+		return nil, fmt.Errorf("can't send request: %w", err)
 	}
 	resp := &domain.CancelOrdersResponse{}
 	err = json.Unmarshal(respBody, resp)
@@ -89,11 +94,11 @@ func (k *KrakenAPI) privateRequest(req *http.Request) (*http.Request, error) {
 	// Get sign
 	body, err := req.GetBody()
 	if err != nil {
-		return nil, fmt.Errorf("can't create signed request: %w", err)
+		return nil, err
 	}
 	postData, err := io.ReadAll(body)
 	if err != nil {
-		return nil, fmt.Errorf("can't create signed request: %w", err)
+		return nil, err
 	}
 	endpointPath := []byte(req.URL.Path[12:])
 	sign := generateSign(postData, endpointPath, k.privateKey)

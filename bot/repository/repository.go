@@ -1,10 +1,11 @@
 package repository
 
 import (
-	"bot/domain"
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v4/pgxpool"
+	// not-std
+	"bot/domain"
 )
 
 func NewPool(dsn string) (*pgxpool.Pool, error) {

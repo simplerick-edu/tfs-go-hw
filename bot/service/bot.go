@@ -1,25 +1,20 @@
 package service
 
 import (
-	"bot/domain"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
-	"text/template"
+	// not-std
+	"bot/domain"
+	log "github.com/sirupsen/logrus"
 )
-
-const NotificationTemplatePath = "service/notification.tmpl"
-
-var NotificationTemplate = template.Must(template.ParseFiles(NotificationTemplatePath))
 
 type ExchangeAPI interface {
 	GetPositions() (*domain.OpenPositionsResponse, error)
 	SendOrder(order domain.Order) (*domain.SendOrderResponse, error)
-	CancelOrders() (*domain.CancelOrdersResponse, error)
-	Subscribe(...string) (<-chan domain.Ticker, error)
+	Subscribe(instruments ...string) (<-chan domain.Ticker, error)
 	Unsubscribe() error
 }
 
@@ -80,8 +75,9 @@ func New(exchangeAPI ExchangeAPI,
 }
 
 func (b *Bot) Start() error {
+	log.Info("start...")
 	if err := b.FetchOpenPositions(); err != nil {
-		return err
+		return fmt.Errorf("fetching positons failed: %w", err)
 	}
 	tickers, err := b.exchangeAPI.Subscribe(b.Instrument)
 	if err != nil {
@@ -94,10 +90,13 @@ func (b *Bot) Start() error {
 	tickerSequences := make(chan []domain.Ticker)
 	go func() {
 		defer func() {
-			log.Println("shutdown")
+			log.Info("shutdown")
 			close(tickerSequences)
-			b.exchangeAPI.Unsubscribe()
 			b.notifier.Stop()
+			err := b.exchangeAPI.Unsubscribe()
+			if err != nil {
+				log.Error(err)
+			}
 		}()
 		seq := make([]domain.Ticker, 0, b.SequenceLength)
 		for ticker := range tickers {
@@ -116,22 +115,9 @@ func (b *Bot) Start() error {
 	// process sequences
 	go func() {
 		for tickers := range tickerSequences {
-			action, err := b.makeDecision(tickers)
+			err := b.processSequence(tickers)
 			if err != nil {
-				log.Fatal(err)
-				return
-			}
-			// calculate price
-			var price float64
-			if action == domain.Buy {
-				price = tickers[len(tickers)-1].Ask * (1 + float64(b.PriceSlipPercent)/100)
-			}
-			if action == domain.Sell {
-				price = tickers[len(tickers)-1].Bid * (1 - float64(b.PriceSlipPercent)/100)
-			}
-			err = b.ChangePosition(action, b.OrderSize, price)
-			if err != nil {
-				log.Fatal(err)
+				log.Error(err)
 				return
 			}
 		}
@@ -139,10 +125,30 @@ func (b *Bot) Start() error {
 	return err
 }
 
+func (b *Bot) processSequence(tickers []domain.Ticker) error {
+	action, err := b.makeDecision(tickers)
+	if err != nil {
+		return fmt.Errorf("make decision failed: %w", err)
+	}
+	// calculate price
+	var price float64
+	if action == domain.Buy {
+		price = tickers[len(tickers)-1].Ask * (1 + float64(b.PriceSlipPercent)/100)
+	}
+	if action == domain.Sell {
+		price = tickers[len(tickers)-1].Bid * (1 - float64(b.PriceSlipPercent)/100)
+	}
+	err = b.ChangePosition(action, b.OrderSize, price)
+	if err != nil {
+		return fmt.Errorf("position change failed: %w", err)
+	}
+	return nil
+}
+
 func (b *Bot) FetchOpenPositions() error {
 	resp, err := b.exchangeAPI.GetPositions()
 	if err != nil {
-		return fmt.Errorf("failed to fetch open positions: %w", err)
+		return err
 	}
 	if resp.Result != domain.Success {
 		return errors.New(*resp.Error)
@@ -157,7 +163,7 @@ func (b *Bot) FetchOpenPositions() error {
 			b.openPositions[pos.Symbol] = -pos.Size
 		}
 	}
-	log.Println("current open positions: ", b.openPositions)
+	log.Info("current open positions: ", b.openPositions)
 	return nil
 }
 
@@ -165,7 +171,7 @@ func (b *Bot) ChangePosition(side domain.Action, size int64, price float64) erro
 	var sign int64
 	switch side {
 	case domain.None:
-		log.Println("action was not specified, position unchanged")
+		log.Info("action was not specified, position unchanged")
 		return nil
 	case domain.Buy:
 		sign = 1
@@ -199,14 +205,17 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 		message = "sending order failed: " + *resp.Error
 	} else {
 		var buff bytes.Buffer
-		NotificationTemplate.Execute(&buff, resp.SendStatus)
+		err := NotificationTemplate.Execute(&buff, resp.SendStatus)
+		if err != nil {
+			log.Error(err)
+		}
 		message = buff.String()
 		// get filled amount, store to db
 		if resp.SendStatus.Status == "placed" {
 			event := resp.SendStatus.OrderEvents[0]
 			err := b.storage.StoreEvent(context.Background(), event)
 			if err != nil {
-				log.Println(err)
+				log.Error(err)
 			}
 			amount = event.Amount
 		}
@@ -214,15 +223,16 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 	// send notification
 	err := b.notifier.Notify(message)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 	}
-	log.Println(message)
+	log.Info(message)
 	return amount
 }
 
 func (b *Bot) makeDecision(tickers []domain.Ticker) (domain.Action, error) {
 	// receive predicted value in range (0,1)
 	value, err := b.model.Predict(tickers...)
+	//log.Println("Predicted value:", value)
 	if err != nil {
 		return domain.None, err
 	}

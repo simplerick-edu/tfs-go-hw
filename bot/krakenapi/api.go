@@ -1,9 +1,10 @@
 package krakenapi
 
 import (
-	"github.com/gorilla/websocket"
 	"net/http"
 	"time"
+	// not-std
+	"github.com/gorilla/websocket"
 )
 
 const (
