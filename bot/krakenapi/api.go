@@ -2,9 +2,7 @@ package krakenapi
 
 import (
 	"github.com/gorilla/websocket"
-	"gopkg.in/yaml.v2"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -12,8 +10,15 @@ const (
 	WebSocketURL     = "wss://demo-futures.kraken.com/ws/v1"
 	SendOrderURL     = "https://demo-futures.kraken.com/derivatives/api/v3/sendorder?"
 	CancelOrdersURL  = "https://demo-futures.kraken.com/derivatives/api/v3/cancelallorders"
-	OpenPositionsURL = "https://demo-futures.kraken.com/derivatives//api/v3/openpositions"
+	OpenPositionsURL = "https://demo-futures.kraken.com/derivatives/api/v3/openpositions"
 )
+const DefaultHttpTimeout = 10 * time.Second
+
+type Config struct {
+	PublicKey   string `yaml:"public_key"`
+	PrivateKey  string `yaml:"private_key"`
+	HttpTimeout string `yaml:"http_timeout"`
+}
 
 type KrakenAPI struct {
 	publicKey  string
@@ -33,16 +38,10 @@ func New(publicKey string, privateKey string, timeout time.Duration) *KrakenAPI 
 	}
 }
 
-func NewWithConfig(filePath string) (*KrakenAPI, error) {
-	var c map[string]string
-	data, err := os.ReadFile(filePath)
+func NewWithConfig(config Config) *KrakenAPI {
+	timeout, err := time.ParseDuration(config.HttpTimeout)
 	if err != nil {
-		return nil, err
+		timeout = DefaultHttpTimeout
 	}
-	err = yaml.Unmarshal(data, &c)
-	if err != nil {
-		return nil, err
-	}
-	timeout, _ := time.ParseDuration(c["timeout"])
-	return New(c["public_key"], c["private_key"], timeout), nil
+	return New(config.PublicKey, config.PrivateKey, timeout)
 }

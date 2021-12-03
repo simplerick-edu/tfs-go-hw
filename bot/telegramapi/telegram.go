@@ -1,33 +1,35 @@
 package telegramapi
 
 import (
+	"errors"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
-	"os"
 	"sync"
 )
 
+var JobQueueIsFull = errors.New("notifier's job queue is full")
+
+const DefaultJobQueueSize = 10
+
 type TgBot struct {
-	chatsMu  sync.Mutex
-	chats    map[int64]*tgbotapi.Chat
-	bot      *tgbotapi.BotAPI
-	jobQueue chan string
+	chatsMu      sync.Mutex
+	chats        map[int64]*tgbotapi.Chat
+	bot          *tgbotapi.BotAPI
+	jobQueue     chan string
+	jobQueueSize int
 }
 
-func New(token string) (*TgBot, error) {
+func New(token string, jobQueueSize int) (*TgBot, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	return &TgBot{
-		chats: make(map[int64]*tgbotapi.Chat),
-		bot:   bot,
+		chats:        make(map[int64]*tgbotapi.Chat),
+		bot:          bot,
+		jobQueueSize: jobQueueSize,
 	}, err
 }
 
-func NewWithCreds(filePath string) (*TgBot, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return New(string(data))
+func NewWithCreds(token string) (*TgBot, error) {
+	return New(token, DefaultJobQueueSize)
 }
 
 func (t *TgBot) Start() error {
@@ -64,11 +66,12 @@ func (t *TgBot) Start() error {
 		}
 	}()
 	// job queue: listen and send messages
-	t.jobQueue = make(chan string)
+	t.jobQueue = make(chan string, t.jobQueueSize)
 	go func() {
 		for message := range t.jobQueue {
 			err := t.sendMessage(message)
 			if err != nil {
+				log.Println(err)
 				return
 			}
 		}
@@ -105,10 +108,17 @@ func (t *TgBot) sendMessage(text string) error {
 			return err
 		}
 	}
-	log.Println("notification sent")
+	if len(t.chats) > 0 {
+		log.Println("notification sent")
+	}
 	return nil
 }
 
-func (t *TgBot) Notify(text string) {
-	t.jobQueue <- text
+func (t *TgBot) Notify(text string) error {
+	select {
+	case t.jobQueue <- text:
+		return nil
+	default:
+		return JobQueueIsFull
+	}
 }

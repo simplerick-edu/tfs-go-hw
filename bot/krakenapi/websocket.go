@@ -10,9 +10,7 @@ import (
 
 const ReconnectAttempts = 10
 
-var (
-	ErrMaxReconnects = errors.New("the maximum number of reconnection attempts has been reached")
-)
+var ErrMaxReconnects = errors.New("the maximum number of reconnection attempts has been reached")
 
 func (k *KrakenAPI) Connect(trialNum int) error {
 	if trialNum < 0 {
@@ -39,7 +37,7 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 	}
 	msg := domain.Message{
 		Event:      "subscribe",
-		Feed:       "candles_trade_1m",
+		Feed:       "ticker",
 		ProductIDs: productIDs,
 	}
 	if err := ConnectAndSendMsg(msg); err != nil {
@@ -61,7 +59,11 @@ func (k *KrakenAPI) Subscribe(productIDs ...string) (<-chan domain.Ticker, error
 				}
 			}
 			ticker := domain.Ticker{}
-			json.Unmarshal(message, &ticker)
+			err = json.Unmarshal(message, &ticker)
+			if err != nil {
+				log.Println("websocket: ", err)
+				return
+			}
 			out <- ticker
 		}
 	}()

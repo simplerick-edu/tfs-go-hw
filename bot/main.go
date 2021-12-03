@@ -7,27 +7,49 @@ import (
 	"bot/repository"
 	"bot/service"
 	"bot/telegramapi"
-	"context"
+	"flag"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"gopkg.in/yaml.v2"
 	"log"
 	"net/http"
+	"os"
 )
 
-func main() {
-	//logger := log.New()
-	//logger.SetLevel(log.DebugLevel)
+var dsn string
+var telegramToken string
+var modelServiceURL string
+var krakenapiConfig krakenapi.Config
+var botConfig service.Parameters
 
-	// repository
-	dsn := "postgres://user:passwd@localhost:5432/orders" +
-		"?sslmode=disable"
-
-	poolConfig, err := pgxpool.ParseConfig(dsn)
+func init() {
+	dsnPath := flag.String("dsn_path", "", "path to dsn")
+	krakenConfigPath := flag.String("kraken_config_path", "", "path to yaml file with kraken config")
+	telegramCredsPath := flag.String("telegram_creds_path", "", "path to file with telegram bot token")
+	modelConfigPath := flag.String("model_config_path", "", "path to file with model service url")
+	botConfigPath := flag.String("bot_config_path", "", "path to yaml file with bot parameters")
+	flag.Parse()
+	data, err := os.ReadFile(*dsnPath)
+	dsn = string(data)
+	data, err = os.ReadFile(*telegramCredsPath)
+	telegramToken = string(data)
+	data, err = os.ReadFile(*modelConfigPath)
+	modelServiceURL = string(data)
+	data, err = os.ReadFile(*botConfigPath)
+	err = yaml.Unmarshal(data, &botConfig)
 	if err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
-	pool, err := pgxpool.ConnectConfig(context.Background(), poolConfig)
+	data, err = os.ReadFile(*krakenConfigPath)
+	err = yaml.Unmarshal(data, &krakenapiConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func main() {
+	// repository
+	pool, err := repository.NewPool(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -35,24 +57,29 @@ func main() {
 	repo := repository.New(pool)
 
 	// notifier
-	telegramNotifier, _ := telegramapi.NewWithCreds("tg_creds")
-
-	// kraken api
-	krakenAPI, _ := krakenapi.NewWithConfig("kraken_config.yaml")
+	telegramNotifier, err := telegramapi.NewWithCreds(telegramToken)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// model service
-	url := "http://localhost:7070/v1/models/trade_model:predict"
-	modelService := modelapi.New(url)
+	modelService := modelapi.New(modelServiceURL)
+
+	// kraken api
+	krakenAPI := krakenapi.NewWithConfig(krakenapiConfig)
 
 	// service
-	tradebot := service.New(krakenAPI, telegramNotifier, repo, modelService,
-		"PI_XBTUSD", 10, 1, 0.5, 4, 1)
+	tradeBot := service.New(krakenAPI, telegramNotifier, repo, modelService, botConfig)
+
+	log.Println(krakenapiConfig)
+	log.Println(botConfig)
+	log.Println(modelServiceURL)
+	log.Println(telegramToken)
+	log.Println(dsn)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
-
-	tradebotHandler := handlers.New(tradebot)
+	tradebotHandler := handlers.New(tradeBot)
 	r.Mount("/", tradebotHandler.Routes())
-
 	log.Fatal(http.ListenAndServe(":3000", r))
 }

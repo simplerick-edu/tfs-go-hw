@@ -11,9 +11,13 @@ import (
 	"text/template"
 )
 
+const NotificationTemplatePath = "service/notification.tmpl"
+
+var NotificationTemplate = template.Must(template.ParseFiles(NotificationTemplatePath))
+
 type ExchangeAPI interface {
 	GetPositions() (*domain.OpenPositionsResponse, error)
-	SendOrder(symbol string, side domain.Action, orderType domain.OrderType, price float64, size int64) (*domain.SendOrderResponse, error)
+	SendOrder(order domain.Order) (*domain.SendOrderResponse, error)
 	CancelOrders() (*domain.CancelOrdersResponse, error)
 	Subscribe(...string) (<-chan domain.Ticker, error)
 	Unsubscribe() error
@@ -29,11 +33,18 @@ type Storage interface {
 
 type Notifier interface {
 	Start() error
-	Notify(text string)
+	Notify(text string) error
 	Stop()
 }
 
-var NotificationTemplate = template.Must(template.ParseFiles("service/notification.tmpl"))
+type Parameters struct {
+	Instrument        string  `yaml:"instrument"`
+	MaxPositionSize   int64   `yaml:"max_position_size"`
+	OrderSize         int64   `yaml:"order_size"`
+	DecisionThreshold float64 `yaml:"decision_threshold"`
+	SequenceLength    int     `yaml:"sequence_length"`
+	PriceSlipPercent  int64   `yaml:"price_slip_percent"`
+}
 
 type Bot struct {
 	// api
@@ -42,14 +53,10 @@ type Bot struct {
 	storage     Storage
 	model       Predictor
 	// parameters
-	instrument        string
-	maxPositionSize   int64
-	orderSize         int64
-	decisionThreshold float64
-	sequenceLength    int
-	priceSlipPercent  int64
+	Parameters
 	// internal variables
-	mu              sync.Mutex
+	muParameters    sync.Mutex
+	muPositions     sync.Mutex
 	openPositions   map[string]int64
 	shutdownChannel chan interface{}
 }
@@ -58,23 +65,14 @@ func New(exchangeAPI ExchangeAPI,
 	notifier Notifier,
 	storage Storage,
 	model Predictor,
-	instrument string,
-	maxPositionSize int64,
-	orderSize int64,
-	decisionThreshold float64,
-	sequenceLength int,
-	priceSlipPercent int64) *Bot {
+	params Parameters) *Bot {
 	return &Bot{
 		exchangeAPI,
 		notifier,
 		storage,
 		model,
-		instrument,
-		maxPositionSize,
-		orderSize,
-		decisionThreshold,
-		sequenceLength,
-		priceSlipPercent,
+		params,
+		sync.Mutex{},
 		sync.Mutex{},
 		make(map[string]int64),
 		make(chan interface{}),
@@ -85,7 +83,7 @@ func (b *Bot) Start() error {
 	if err := b.FetchOpenPositions(); err != nil {
 		return err
 	}
-	tickers, err := b.exchangeAPI.Subscribe(b.instrument)
+	tickers, err := b.exchangeAPI.Subscribe(b.Instrument)
 	if err != nil {
 		return err
 	}
@@ -101,15 +99,15 @@ func (b *Bot) Start() error {
 			b.exchangeAPI.Unsubscribe()
 			b.notifier.Stop()
 		}()
-		seq := make([]domain.Ticker, 0, b.sequenceLength)
+		seq := make([]domain.Ticker, 0, b.SequenceLength)
 		for ticker := range tickers {
 			select {
 			case <-b.shutdownChannel:
 				return
 			default:
-				if len(seq) == b.sequenceLength {
+				if len(seq) == b.SequenceLength {
 					tickerSequences <- seq
-					seq = make([]domain.Ticker, 0, b.sequenceLength)
+					seq = make([]domain.Ticker, 0, b.SequenceLength)
 				}
 				seq = append(seq, ticker)
 			}
@@ -126,12 +124,12 @@ func (b *Bot) Start() error {
 			// calculate price
 			var price float64
 			if action == domain.Buy {
-				price = tickers[len(tickers)-1].Ask * (1 + float64(b.priceSlipPercent)/100)
+				price = tickers[len(tickers)-1].Ask * (1 + float64(b.PriceSlipPercent)/100)
 			}
 			if action == domain.Sell {
-				price = tickers[len(tickers)-1].Bid * (1 - float64(b.priceSlipPercent)/100)
+				price = tickers[len(tickers)-1].Bid * (1 - float64(b.PriceSlipPercent)/100)
 			}
-			err = b.ChangePosition(action, b.orderSize, price)
+			err = b.ChangePosition(action, b.OrderSize, price)
 			if err != nil {
 				log.Fatal(err)
 				return
@@ -149,8 +147,8 @@ func (b *Bot) FetchOpenPositions() error {
 	if resp.Result != domain.Success {
 		return errors.New(*resp.Error)
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.muPositions.Lock()
+	defer b.muPositions.Unlock()
 	b.openPositions = make(map[string]int64)
 	for _, pos := range resp.OpenPositions {
 		if pos.Side == "long" {
@@ -174,20 +172,21 @@ func (b *Bot) ChangePosition(side domain.Action, size int64, price float64) erro
 	case domain.Sell:
 		sign = -1
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	currentPos := b.openPositions[b.instrument]
-	// keep position size within limits (-maxPositionSize, +maxPositionSize)
-	size = domain.Min(size, b.maxPositionSize-sign*currentPos)
+	b.muPositions.Lock()
+	defer b.muPositions.Unlock()
+	currentPos := b.openPositions[b.Instrument]
+	// keep position size within limits (-MaxPositionSize, +MaxPositionSize)
+	size = domain.Min(size, b.MaxPositionSize-sign*currentPos)
 	if size != 0 {
-		resp, err := b.exchangeAPI.SendOrder(b.instrument, side, domain.IocType, price, size)
+		order := *domain.NewOrder(b.Instrument, side, domain.IocType, price, size)
+		resp, err := b.exchangeAPI.SendOrder(order)
 		if err != nil {
 			return err
 		}
 		actualAmount := b.processResponse(resp)
-		b.openPositions[b.instrument] += sign * actualAmount
-		if b.openPositions[b.instrument] == 0 {
-			delete(b.openPositions, b.instrument)
+		b.openPositions[b.Instrument] += sign * actualAmount
+		if b.openPositions[b.Instrument] == 0 {
+			delete(b.openPositions, b.Instrument)
 		}
 	}
 	return nil
@@ -213,7 +212,10 @@ func (b *Bot) processResponse(resp *domain.SendOrderResponse) int64 {
 		}
 	}
 	// send notification
-	b.notifier.Notify(message)
+	err := b.notifier.Notify(message)
+	if err != nil {
+		log.Println(err)
+	}
 	log.Println(message)
 	return amount
 }
@@ -224,10 +226,10 @@ func (b *Bot) makeDecision(tickers []domain.Ticker) (domain.Action, error) {
 	if err != nil {
 		return domain.None, err
 	}
-	if value > b.decisionThreshold {
+	if value > b.DecisionThreshold {
 		return domain.Buy, nil
 	}
-	if value < 1-b.decisionThreshold {
+	if value < 1-b.DecisionThreshold {
 		return domain.Sell, nil
 	}
 	return domain.None, nil

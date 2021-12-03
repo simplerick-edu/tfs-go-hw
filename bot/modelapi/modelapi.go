@@ -10,6 +10,8 @@ import (
 
 type vector []float64
 
+const DefaultSignatureName = "serving_default"
+
 type tfServeData struct {
 	SignatureName string     `json:"signature_name"`
 	Instances     [][]vector `json:"instances"`
@@ -29,7 +31,7 @@ func New(url string) *ModelService {
 
 func (m *ModelService) Predict(tickers ...domain.Ticker) (float64, error) {
 	sequence := toSequence(tickers)
-	data := tfServeData{"serving_default",
+	data := tfServeData{DefaultSignatureName,
 		[][]vector{sequence}}
 	postBody, _ := json.Marshal(data)
 	resp, err := http.Post(m.url, "application/json", bytes.NewBuffer(postBody))
@@ -37,9 +39,15 @@ func (m *ModelService) Predict(tickers ...domain.Ticker) (float64, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
 	tfResp := &tfServeResponse{}
-	json.Unmarshal(bodyBytes, tfResp)
+	err = json.Unmarshal(bodyBytes, tfResp)
+	if err != nil {
+		return 0, err
+	}
 	return tfResp.Predictions[0][0], nil
 }
 
@@ -49,13 +57,13 @@ func toSequence(tickers []domain.Ticker) []vector {
 		vec := vector{
 			ticker.Bid,
 			ticker.Ask,
-			float64(ticker.BidSize),
-			float64(ticker.AskSize),
-			float64(ticker.Volume),
+			ticker.BidSize,
+			ticker.AskSize,
+			ticker.Volume,
 			float64(ticker.Dtm),
-			float64(ticker.Last),
+			ticker.Last,
 			ticker.Change,
-			float64(ticker.OpenInterest),
+			ticker.OpenInterest,
 		}
 		sequence = append(sequence, vec)
 	}
